@@ -26,6 +26,44 @@ static Go binary, stdlib-only dependencies.
   sensors in the network cannot correlate your IPs against theirs
   byte-for-byte (only the server, which sees every pepper, can)
 
+## Prerequisites
+
+- **OS**: Linux (sweetADB itself requires Linux). The adapter also
+  builds cleanly on macOS and FreeBSD, but you'd only run it on the
+  same host where sweetADB is writing its log.
+- **Go 1.21 or newer** to build from source. **Check your version:**
+  ```bash
+  go version
+  ```
+  It must say `go1.21` or higher. Go versions older than 1.21 lack
+  the `log/slog` package and will fail to compile with errors like
+  `package log/slog is not in GOROOT`.
+
+  **`apt install golang` on Debian/Ubuntu often pins an older
+  version.** If `go version` reports anything below 1.21, uninstall
+  the distro package and install a current toolchain instead:
+  ```bash
+  # Ubuntu / Debian — via Snap (simplest):
+  sudo apt remove -y golang-go golang
+  sudo snap install go --classic
+
+  # Or manual — download the latest tarball from go.dev/dl/:
+  curl -fsSL https://go.dev/dl/go1.23.4.linux-amd64.tar.gz | \
+    sudo tar -C /usr/local -xz
+  echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+  source ~/.profile
+  go version   # verify it now says 1.23+
+  ```
+
+  On macOS: `brew install go`. On Alpine: `apk add go`. On other
+  distros: see [go.dev/doc/install](https://go.dev/doc/install).
+- **A running sweetADB instance** writing to `./mimic/events.jsonl`.
+- **Outbound HTTPS** to `www.boarnet.io` (no special firewall rules
+  needed — the adapter makes only one kind of external connection).
+- **Sudo access** only if you want to install the binary to
+  `/usr/local/bin/` or run under systemd. Neither is required —
+  the adapter works from any path, any user that can read the log.
+
 ## Install
 
 1. **Mint an ingest token** at
