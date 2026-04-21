@@ -137,6 +137,7 @@ journalctl -u boarnet-sweetadb -f
 | `--sensor-id` | `BOARNET_SENSOR_ID` | *required* | Stable id, e.g. `mesh-fra1-adb-01` |
 | `--fleet` | `BOARNET_FLEET` | `mesh` | `mesh` for partner-run; `core` reserved for BoarNet-operated |
 | `--persona` | `BOARNET_PERSONA` | `sweetadb` | Dashboard grouping label |
+| `--start-from` | `BOARNET_START_FROM` | `begin` | First-run behavior. `begin` ships the whole existing `events.jsonl` (backlog upload); `eof` starts at the tail and only ships events written from now forward. Subsequent runs always resume from the saved offset regardless. |
 | `--data-dir` | `BOARNET_DATA_DIR` | `/var/lib/boarnet-sweetadb` | Writable dir for pepper + tail offset |
 | `--pepper-key-id` | `BOARNET_PEPPER_KEY_ID` | `pepper-sweetadb-v1` | Stamp on envelope.encryption_hints.pepper_key_id |
 | `--verbose` |  | off | Log every envelope at DEBUG |

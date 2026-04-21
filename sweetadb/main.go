@@ -62,6 +62,7 @@ type config struct {
 	DataDir     string
 	Fleet       string
 	Persona     string
+	StartFrom   string // "begin" = upload backlog, "eof" = tail new events only
 	Verbose     bool
 }
 
@@ -85,6 +86,11 @@ func loadConfig() (*config, error) {
 		"Fleet tier (mesh for partner sensors; core reserved for BoarNet-operated)")
 	flag.StringVar(&c.Persona, "persona", envOr("BOARNET_PERSONA", "sweetadb"),
 		"Persona tag for dashboard grouping")
+	flag.StringVar(&c.StartFrom, "start-from", envOr("BOARNET_START_FROM", "begin"),
+		"First-run behavior: 'begin' ships the entire existing "+
+			"events.jsonl (backlog upload); 'eof' starts at the tail "+
+			"and ships only events written from now forward. Subsequent "+
+			"runs always resume from the saved offset regardless.")
 	flag.BoolVar(&c.Verbose, "verbose", false, "Log every envelope emitted")
 	flag.Parse()
 
@@ -96,6 +102,9 @@ func loadConfig() (*config, error) {
 	}
 	if c.Fleet != "core" && c.Fleet != "mesh" {
 		return nil, fmt.Errorf("--fleet must be core or mesh, got %q", c.Fleet)
+	}
+	if c.StartFrom != "begin" && c.StartFrom != "eof" {
+		return nil, fmt.Errorf("--start-from must be begin or eof, got %q", c.StartFrom)
 	}
 	return c, nil
 }
@@ -343,32 +352,47 @@ func payloadEnvelope(cfg *config, p *pepper, path string) (*envelope, error) {
 // ---------- log tailer (inode + byte offset) ----------
 
 type tailer struct {
-	path    string
-	offset  int64
-	inode   uint64
-	log     *slog.Logger
-	offPath string
+	path       string
+	offset     int64
+	inode      uint64
+	log        *slog.Logger
+	offPath    string
+	firstRun   bool // true until loadOffset succeeds / saveOffset writes
+	startAtEOF bool // honored only on firstRun
 }
 
-func newTailer(path, offPath string, log *slog.Logger) *tailer {
-	t := &tailer{path: path, offPath: offPath, log: log}
-	t.loadOffset()
+func newTailer(path, offPath string, log *slog.Logger, startAtEOF bool) *tailer {
+	t := &tailer{
+		path:       path,
+		offPath:    offPath,
+		log:        log,
+		firstRun:   true,
+		startAtEOF: startAtEOF,
+	}
+	if t.loadOffset() {
+		t.firstRun = false
+	}
 	return t
 }
 
-func (t *tailer) loadOffset() {
+// loadOffset returns true iff a saved offset was successfully read.
+// A false return means this is a first run (no offset file, fresh
+// install) and the caller decides whether to start at byte 0 or EOF.
+func (t *tailer) loadOffset() bool {
 	b, err := os.ReadFile(t.offPath)
 	if err != nil {
-		return
+		return false
 	}
 	var saved struct {
 		Inode  uint64 `json:"inode"`
 		Offset int64  `json:"offset"`
 	}
-	if err := json.Unmarshal(b, &saved); err == nil {
-		t.inode = saved.Inode
-		t.offset = saved.Offset
+	if err := json.Unmarshal(b, &saved); err != nil {
+		return false
 	}
+	t.inode = saved.Inode
+	t.offset = saved.Offset
+	return true
 }
 
 func (t *tailer) saveOffset() {
@@ -417,6 +441,22 @@ func (t *tailer) step(ctx context.Context, onLine func([]byte)) error {
 		return err
 	}
 	curInode := fileInode(st)
+	// First-run policy: if there was no saved offset file AND the
+	// operator passed --start-from=eof, skip the existing backlog by
+	// seeking to the current end-of-file and persisting that as the
+	// starting offset. Any events written from NOW forward get
+	// shipped; anything already in the file is ignored.
+	if t.firstRun {
+		if t.startAtEOF {
+			t.offset = st.Size()
+			t.log.Info("first run — starting at EOF (skipping backlog)",
+				"size_bytes", st.Size(), "path", t.path)
+		} else {
+			t.log.Info("first run — starting at offset 0 (uploading backlog)",
+				"size_bytes", st.Size(), "path", t.path)
+		}
+		t.firstRun = false
+	}
 	if t.inode != 0 && curInode != 0 && curInode != t.inode {
 		t.log.Info("log rotated — seeking to start of new file", "old_inode", t.inode, "new_inode", curInode)
 		t.offset = 0
@@ -718,8 +758,12 @@ func main() {
 	go watchPayloads(ctx, cfg, pep, pub, log)
 
 	offPath := filepath.Join(cfg.DataDir, "events-tail.offset")
-	t := newTailer(cfg.EventsLog, offPath, log)
-	log.Info("tailing events.jsonl", "path", cfg.EventsLog, "offset", t.offset)
+	t := newTailer(cfg.EventsLog, offPath, log, cfg.StartFrom == "eof")
+	log.Info("tailing events.jsonl",
+		"path", cfg.EventsLog,
+		"offset", t.offset,
+		"start_from", cfg.StartFrom,
+	)
 
 	err = t.Run(ctx, func(line []byte) {
 		var ev sweetEvent
