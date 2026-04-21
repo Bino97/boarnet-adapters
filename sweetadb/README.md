@@ -63,6 +63,22 @@ static Go binary, stdlib-only dependencies.
 - **Sudo access** only if you want to install the binary to
   `/usr/local/bin/` or run under systemd. Neither is required —
   the adapter works from any path, any user that can read the log.
+- **Unprivileged `boarnet` system user** — required only if you
+  plan to run the adapter under systemd (the shipped unit file
+  specifies `User=boarnet`). Skip if you're running ad-hoc as your
+  own user from the command line. One-time setup:
+  ```bash
+  sudo useradd --system --shell /usr/sbin/nologin \
+    --home /var/lib/boarnet-sweetadb boarnet
+  sudo mkdir -p /var/lib/boarnet-sweetadb
+  sudo chown boarnet:boarnet /var/lib/boarnet-sweetadb
+  ```
+  If sweetADB writes its `events.jsonl` under a different user's
+  home, also grant read access:
+  ```bash
+  sudo setfacl -m u:boarnet:rx /home/<sweetadb-user>
+  sudo setfacl -R -m u:boarnet:r /home/<sweetadb-user>/sweetADB/mimic
+  ```
 
 ## Install
 
@@ -156,6 +172,24 @@ sweetADB events translate to BoarNet envelope `event_type` as:
 shown once on mint and revocable from /dashboard/sensors.
 
 **"register 401: missing_bearer"** — `--token` flag / env missing.
+
+**`status=217/USER` in `journalctl -u boarnet-sweetadb`** — the
+systemd unit specifies `User=boarnet` but the user doesn't exist
+on the host. You skipped the system-user setup in Prerequisites.
+Create it:
+```bash
+sudo useradd --system --shell /usr/sbin/nologin \
+  --home /var/lib/boarnet-sweetadb boarnet
+sudo mkdir -p /var/lib/boarnet-sweetadb
+sudo chown boarnet:boarnet /var/lib/boarnet-sweetadb
+sudo systemctl restart boarnet-sweetadb
+```
+
+**`fleet_privilege_exceeded`** — you set `--fleet core` but your
+ingest token was minted as `mesh`. Drop the flag (defaults to
+`mesh`, which is correct for partner-run adapters) or mint a new
+core token from a BoarNet account that's authorized to issue
+them.
 
 **"batch failed — ingest 400: invalid_event_type"** — means
 BoarNet's ingest validator doesn't yet have `adb.*` types (your
