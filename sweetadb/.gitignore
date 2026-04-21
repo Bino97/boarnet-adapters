@@ -1,0 +1,8 @@
+# Go build outputs — never commit binaries
+boarnet-sweetadb-adapter
+sweetadb
+sweetadb.exe
+*.exe
+# Local data — pepper, offsets
+pepper.secret
+*.offset

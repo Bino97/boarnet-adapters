@@ -1,0 +1,38 @@
+[Unit]
+Description=BoarNet sweetADB adapter — ships events.jsonl into BoarNet
+Documentation=https://github.com/Bino97/boarnet-adapters/tree/main/sweetadb
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Dedicated unprivileged user. Create with:
+#   sudo useradd --system --shell /usr/sbin/nologin --home /var/lib/boarnet-sweetadb boarnet
+User=boarnet
+Group=boarnet
+EnvironmentFile=/etc/boarnet/sweetadb.env
+ExecStart=/usr/local/bin/boarnet-sweetadb-adapter \
+  --events-log /var/log/sweetadb/mimic/events.jsonl \
+  --payloads-dir /var/log/sweetadb/mimic/payloads \
+  --data-dir /var/lib/boarnet-sweetadb \
+  --sensor-id ${BOARNET_SENSOR_ID} \
+  --token ${BOARNET_TOKEN}
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+# Hardening: adapter only needs read on the log files + write on
+# its own data dir + outbound https. No need for network raw
+# sockets, no need for CAP_NET_BIND_SERVICE.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/boarnet-sweetadb
+# If sweetADB writes to a different location than the default,
+# grant read access here instead of in ExecStart.
+ReadOnlyPaths=/var/log/sweetadb
+
+[Install]
+WantedBy=multi-user.target
