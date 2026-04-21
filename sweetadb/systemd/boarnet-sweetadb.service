@@ -6,10 +6,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Dedicated unprivileged user. Create with:
-#   sudo useradd --system --shell /usr/sbin/nologin --home /var/lib/boarnet-sweetadb boarnet
-User=boarnet
-Group=boarnet
+
+# DynamicUser + StateDirectory — no pre-creation required.
+# systemd allocates a transient UID at service start, persists the
+# same UID across restarts for this service, and creates
+# /var/lib/boarnet-sweetadb owned by it (mode 0700). Lifetime of
+# the user tracks the lifetime of the service. Eliminates the
+# status=217/USER failure mode that bit early partners who
+# deployed before creating a `boarnet` system user.
+DynamicUser=true
+StateDirectory=boarnet-sweetadb
+StateDirectoryMode=0700
+
 EnvironmentFile=/etc/boarnet/sweetadb.env
 ExecStart=/usr/local/bin/boarnet-sweetadb-adapter \
   --events-log /var/log/sweetadb/mimic/events.jsonl \
@@ -22,16 +30,16 @@ RestartSec=5s
 StandardOutput=journal
 StandardError=journal
 
-# Hardening: adapter only needs read on the log files + write on
-# its own data dir + outbound https. No need for network raw
-# sockets, no need for CAP_NET_BIND_SERVICE.
+# Hardening — the adapter needs read on the honeypot log + write
+# on its StateDirectory + outbound HTTPS. Nothing else.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/boarnet-sweetadb
+
 # If sweetADB writes to a different location than the default,
-# grant read access here instead of in ExecStart.
+# adjust this path. DynamicUser auto-grants read access to paths
+# listed in ReadOnlyPaths.
 ReadOnlyPaths=/var/log/sweetadb
 
 [Install]

@@ -63,22 +63,23 @@ static Go binary, stdlib-only dependencies.
 - **Sudo access** only if you want to install the binary to
   `/usr/local/bin/` or run under systemd. Neither is required —
   the adapter works from any path, any user that can read the log.
-- **Unprivileged `boarnet` system user** — required only if you
-  plan to run the adapter under systemd (the shipped unit file
-  specifies `User=boarnet`). Skip if you're running ad-hoc as your
-  own user from the command line. One-time setup:
+- **If sweetADB writes its `events.jsonl` under a different user's
+  home**, grant read access so the adapter process (running under
+  a systemd-managed dynamic user by default) can reach it:
   ```bash
-  sudo useradd --system --shell /usr/sbin/nologin \
-    --home /var/lib/boarnet-sweetadb boarnet
-  sudo mkdir -p /var/lib/boarnet-sweetadb
-  sudo chown boarnet:boarnet /var/lib/boarnet-sweetadb
+  sudo setfacl -m u:systemd-boarnet-sweetadb:rx /home/<sweetadb-user>
+  sudo setfacl -R -m u:systemd-boarnet-sweetadb:r /home/<sweetadb-user>/sweetADB/mimic
   ```
-  If sweetADB writes its `events.jsonl` under a different user's
-  home, also grant read access:
-  ```bash
-  sudo setfacl -m u:boarnet:rx /home/<sweetadb-user>
-  sudo setfacl -R -m u:boarnet:r /home/<sweetadb-user>/sweetADB/mimic
-  ```
+  Or, more commonly, run sweetADB with `--log-dir /var/log/sweetadb`
+  so its output lands in a system-level path the adapter can already
+  reach via the shipped unit's `ReadOnlyPaths=/var/log/sweetadb`.
+
+> No more `boarnet` user creation — the shipped systemd unit now
+> uses `DynamicUser=true` + `StateDirectory=boarnet-sweetadb`,
+> which allocates a transient UID at service start and persists
+> the state directory across restarts. Eliminates the
+> `status=217/USER` failure that hit early adopters who missed
+> the manual `useradd` step.
 
 ## Install
 
@@ -174,17 +175,20 @@ shown once on mint and revocable from /dashboard/sensors.
 
 **"register 401: missing_bearer"** — `--token` flag / env missing.
 
-**`status=217/USER` in `journalctl -u boarnet-sweetadb`** — the
-systemd unit specifies `User=boarnet` but the user doesn't exist
-on the host. You skipped the system-user setup in Prerequisites.
-Create it:
+**`status=217/USER` in `journalctl -u boarnet-sweetadb`** — you're
+running an older unit file that has `User=boarnet` baked in,
+which requires a pre-created system user. Current unit files use
+`DynamicUser=true` and don't need this step. Pull the latest
+unit file:
 ```bash
-sudo useradd --system --shell /usr/sbin/nologin \
-  --home /var/lib/boarnet-sweetadb boarnet
-sudo mkdir -p /var/lib/boarnet-sweetadb
-sudo chown boarnet:boarnet /var/lib/boarnet-sweetadb
+sudo curl -fsSL -o /etc/systemd/system/boarnet-sweetadb.service \
+  https://raw.githubusercontent.com/Bino97/boarnet-adapters/main/sweetadb/systemd/boarnet-sweetadb.service
+sudo systemctl daemon-reload
 sudo systemctl restart boarnet-sweetadb
 ```
+If you're intentionally staying on the old `User=boarnet` variant,
+create the user once with `sudo useradd --system --shell /usr/sbin/nologin
+--home /var/lib/boarnet-sweetadb boarnet` and chown the data dir.
 
 **`fleet_privilege_exceeded`** — you set `--fleet core` but your
 ingest token was minted as `mesh`. Drop the flag (defaults to
