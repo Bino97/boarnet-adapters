@@ -127,6 +127,73 @@ sudo systemctl enable --now boarnet-sweetadb
 journalctl -u boarnet-sweetadb -f
 ```
 
+Minimal `/etc/boarnet/sweetadb.env`:
+```env
+BOARNET_TOKEN=bn_your_token_here
+BOARNET_SENSOR_ID=mesh-fra1-adb-01
+```
+
+The shipped unit defaults to reading from `/var/log/sweetadb/mimic/`.
+If sweetADB is writing somewhere else, see below.
+
+### Non-default log locations
+
+The unit defaults assume sweetADB writes to
+`/var/log/sweetadb/mimic/events.jsonl`. Two common deviations:
+
+**(a) sweetADB writes to a system-level path you control** —
+e.g. you ran sweetADB with `--log-dir /srv/sweetadb`. Set the
+path in `/etc/boarnet/sweetadb.env`:
+```env
+SWEETADB_EVENTS_LOG=/srv/sweetadb/mimic/events.jsonl
+SWEETADB_PAYLOADS_DIR=/srv/sweetadb/mimic/payloads
+```
+Then add a drop-in so the hardening lets the adapter read it:
+```bash
+sudo systemctl edit boarnet-sweetadb
+```
+Paste:
+```ini
+[Service]
+ReadOnlyPaths=
+ReadOnlyPaths=/srv/sweetadb
+```
+(The empty `ReadOnlyPaths=` clears the base unit's `/var/log/sweetadb`
+entry; the second line adds the new path. Without the reset, both
+paths would be listed — harmless but noisy.)
+
+**(b) sweetADB writes inside `/root/`** — e.g. you run sweetADB
+as root from `/root/` and it creates `/root/mimic/events.jsonl`
+next to itself. Set the paths in `sweetadb.env`:
+```env
+SWEETADB_EVENTS_LOG=/root/mimic/events.jsonl
+SWEETADB_PAYLOADS_DIR=/root/mimic/payloads
+```
+Then drop in the hardening override:
+```bash
+sudo systemctl edit boarnet-sweetadb
+```
+Paste:
+```ini
+[Service]
+ProtectHome=read-only
+BindReadOnlyPaths=/root/mimic
+```
+`ProtectHome=read-only` relaxes the base unit's `ProtectHome=true`
+(which hides `/root/` entirely) to read-only visibility.
+`BindReadOnlyPaths=` then makes `/root/mimic` specifically reachable
+by the dynamic user. We don't widen to all of `/root/` — only the
+one directory the adapter needs.
+
+Reload and restart after any drop-in edit:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart boarnet-sweetadb
+sudo journalctl -u boarnet-sweetadb -f
+```
+Within ~30s you should see `tailing events.jsonl path=... offset=...`
+and then `batch sent count=N` once attacker traffic arrives.
+
 ## Flags / env
 
 | Flag | Env | Default | Purpose |
@@ -142,6 +209,14 @@ journalctl -u boarnet-sweetadb -f
 | `--data-dir` | `BOARNET_DATA_DIR` | `/var/lib/boarnet-sweetadb` | Writable dir for pepper + tail offset |
 | `--pepper-key-id` | `BOARNET_PEPPER_KEY_ID` | `pepper-sweetadb-v1` | Stamp on envelope.encryption_hints.pepper_key_id |
 | `--verbose` |  | off | Log every envelope at DEBUG |
+
+Under the shipped systemd unit, `SWEETADB_EVENTS_LOG` and
+`SWEETADB_PAYLOADS_DIR` default to `/var/log/sweetadb/mimic/...`
+(set via `Environment=` in the unit). Values in
+`/etc/boarnet/sweetadb.env` override those defaults — the unit
+file itself does not need to be edited to change paths. See
+**Non-default log locations** above for the two common override
+recipes.
 
 ## Event mapping
 
@@ -205,6 +280,24 @@ deploy pending.
 is actually writing to the configured `--events-log`. The adapter
 logs `tailing events.jsonl path=... offset=...` at startup;
 `offset > 0` after a few attacks means events are being consumed.
+
+**`journalctl -u boarnet-sweetadb` shows the adapter starting
+cleanly but `grep -E 'batch sent|batch failed'` returns nothing**
+— the adapter is running but its file tail never opens. Almost
+always a path mismatch between the unit and where sweetADB is
+actually writing. Check what sweetADB wrote:
+```bash
+sudo find / -name events.jsonl 2>/dev/null
+```
+If the path isn't `/var/log/sweetadb/mimic/events.jsonl`, set
+`SWEETADB_EVENTS_LOG`/`SWEETADB_PAYLOADS_DIR` in
+`/etc/boarnet/sweetadb.env` and — if the new path lives outside
+`/var/log/sweetadb` — add the drop-in from
+**Non-default log locations** above. `ProtectHome=true` in the
+base unit hides `/root/` and `/home/` entirely, so an adapter
+pointed at `/root/mimic/events.jsonl` with no drop-in will fail
+to open the file silently (the tail worker retries forever
+without logging an error for each attempt).
 
 ## License
 

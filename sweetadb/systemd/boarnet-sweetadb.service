@@ -18,10 +18,16 @@ DynamicUser=true
 StateDirectory=boarnet-sweetadb
 StateDirectoryMode=0700
 
+# Default log paths — override in /etc/boarnet/sweetadb.env (or a
+# systemd drop-in, see README) if sweetADB writes elsewhere. Values
+# here are defaults; EnvironmentFile= below takes precedence.
+Environment=SWEETADB_EVENTS_LOG=/var/log/sweetadb/mimic/events.jsonl
+Environment=SWEETADB_PAYLOADS_DIR=/var/log/sweetadb/mimic/payloads
+
 EnvironmentFile=/etc/boarnet/sweetadb.env
 ExecStart=/usr/local/bin/boarnet-sweetadb-adapter \
-  --events-log /var/log/sweetadb/mimic/events.jsonl \
-  --payloads-dir /var/log/sweetadb/mimic/payloads \
+  --events-log ${SWEETADB_EVENTS_LOG} \
+  --payloads-dir ${SWEETADB_PAYLOADS_DIR} \
   --data-dir /var/lib/boarnet-sweetadb \
   --sensor-id ${BOARNET_SENSOR_ID} \
   --token ${BOARNET_TOKEN}
@@ -37,9 +43,10 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 
-# If sweetADB writes to a different location than the default,
-# adjust this path. DynamicUser auto-grants read access to paths
-# listed in ReadOnlyPaths.
+# Read access to the default log location. If you point
+# SWEETADB_EVENTS_LOG at a path outside /var/log/sweetadb (e.g.
+# /root/mimic/), you ALSO need a drop-in to grant read access —
+# see the README "Non-default log locations" section.
 ReadOnlyPaths=/var/log/sweetadb
 
 [Install]
